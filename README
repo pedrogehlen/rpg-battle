@@ -1,0 +1,410 @@
+# 📚 GUIA DE PROVA — API REST com Spring Boot + Kotlin + PostgreSQL
+
+> **Esse arquivo é seu guia de consulta na prova.**
+> Leia do início ao fim antes de começar. Tudo que você precisa está aqui.
+
+---
+
+## 🗺️ VISÃO GERAL — O que a prova pede
+
+```
+✅ Criar aplicação WEB (RESTful)
+✅ Conexão com banco de dados (PostgreSQL)
+✅ Camada de modelagem (Entity)
+✅ Camada de repositório com JPA
+✅ Camada de controle (Controller) com:
+   → POST  — salvar e editar entidade
+   → GET   — buscar um elemento por ID
+   → GET   — buscar todos os elementos
+   → DELETE — excluir uma entidade
+```
+
+---
+
+## 🏗️ PASSO A PASSO — Ordem de criação (NUNCA pule etapas)
+
+```
+1. Criar projeto no IntelliJ (Spring Initializr)
+2. Configurar application.properties (banco)
+3. Criar a Entity
+4. Criar o Repository
+5. Criar o Service
+6. Criar o Controller
+7. Rodar e testar no Postman
+```
+
+---
+
+## PASSO 1 — Criar o Projeto no IntelliJ
+
+```
+File → New → Project → Spring Initializr
+
+Configurações:
+  Name:        nome-do-projeto
+  Language:    Kotlin
+  Type:        Maven
+  Group:       com.exemplo
+  Artifact:    nome-do-projeto
+  Java:        21
+
+Dependências (adicionar todas):
+  ✅ Spring Web
+  ✅ Spring Data JPA
+  ✅ PostgreSQL Driver
+```
+
+---
+
+## PASSO 2 — application.properties
+
+Arquivo em: `src/main/resources/application.properties`
+
+```properties
+spring.application.name=nome-do-projeto
+
+# Conexão com o banco
+spring.datasource.url=jdbc:postgresql://localhost:5432/nome_do_banco
+spring.datasource.username=postgres
+spring.datasource.password=SUA_SENHA_AQUI
+
+# Hibernate cria/atualiza as tabelas automaticamente
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+```
+
+> ⚠️ **Atenção:** O banco `nome_do_banco` precisa existir no PgAdmin antes de rodar!
+> Crie pelo PgAdmin: botão direito em "Databases" → Create → Database
+
+---
+
+## PASSO 3 — Entity (Camada de Modelagem)
+
+> **O que é:** Representa uma tabela no banco de dados.
+> **Analogia:** É o "molde" do objeto — define quais colunas a tabela vai ter.
+
+```kotlin
+package com.exemplo.nomedoprojeto.entity
+
+import jakarta.persistence.*
+
+@Entity                          // Diz ao Hibernate: "isso é uma tabela"
+@Table(name = "produtos")        // Nome da tabela no banco (pode omitir, usa o nome da classe)
+open class Produto(
+
+    @Id                                          // Chave primária
+    @GeneratedValue(strategy = GenerationType.IDENTITY)  // Auto incremento
+    val id: Long = 0,
+
+    var nome: String = "",       // var = pode mudar (coluna editável)
+    var preco: Double = 0.0,
+    var quantidade: Int = 0
+)
+```
+
+> 💡 **Por que `open class`?** O Hibernate precisa criar subclasses da sua Entity internamente. Se não colocar `open`, dá erro.
+>
+> 💡 **`val` vs `var`:** Use `val` para o `id` (nunca muda). Use `var` para tudo que pode ser editado.
+
+---
+
+## PASSO 4 — Repository (Camada de Repositório)
+
+> **O que é:** A ponte entre seu código e o banco de dados.
+> **Analogia:** É o "garçom" — você pede, ele busca no banco.
+
+```kotlin
+package com.exemplo.nomedoprojeto.repository
+
+import com.exemplo.nomedoprojeto.entity.Produto
+import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.stereotype.Repository
+
+@Repository
+interface ProdutoRepository : JpaRepository<Produto, Long>
+//                                            ↑        ↑
+//                              tipo da entidade    tipo do ID
+```
+
+> 💡 **Só isso!** O Spring implementa automaticamente: save, findById, findAll, deleteById.
+> Você não precisa escrever nenhum método — eles já existem no JpaRepository.
+
+---
+
+## PASSO 5 — Service (Camada de Serviço)
+
+> **O que é:** A lógica de negócio da aplicação.
+> **Analogia:** É o "cozinheiro" — recebe o pedido e sabe como processar.
+
+```kotlin
+package com.exemplo.nomedoprojeto.service
+
+import com.exemplo.nomedoprojeto.entity.Produto
+import com.exemplo.nomedoprojeto.repository.ProdutoRepository
+import org.springframework.stereotype.Service
+
+@Service
+class ProdutoService(
+    private val produtoRepository: ProdutoRepository  // Injeção de dependência
+) {
+
+    // Salvar novo produto
+    fun salvar(produto: Produto): Produto {
+        return produtoRepository.save(produto)
+    }
+
+    // Buscar todos
+    fun listarTodos(): List<Produto> {
+        return produtoRepository.findAll()
+    }
+
+    // Buscar por ID
+    fun buscarPorId(id: Long): Produto? {
+        return produtoRepository.findById(id).orElse(null)
+    }
+
+    // Editar produto existente
+    fun editar(id: Long, produtoAtualizado: Produto): Produto? {
+        val existente = produtoRepository.findById(id).orElse(null) ?: return null
+        existente.nome = produtoAtualizado.nome
+        existente.preco = produtoAtualizado.preco
+        existente.quantidade = produtoAtualizado.quantidade
+        return produtoRepository.save(existente)
+    }
+
+    // Deletar
+    fun deletar(id: Long) {
+        produtoRepository.deleteById(id)
+    }
+}
+```
+
+> 💡 **Injeção de dependência:** O Spring entrega automaticamente o `ProdutoRepository` para o Service.
+> Você só declara no construtor — o Spring resolve.
+
+---
+
+## PASSO 6 — Controller (Camada de Controle)
+
+> **O que é:** Recebe as requisições HTTP e retorna respostas.
+> **Analogia:** É a "porta de entrada" — o cliente bate, o controller atende.
+
+```kotlin
+package com.exemplo.nomedoprojeto.controller
+
+import com.exemplo.nomedoprojeto.entity.Produto
+import com.exemplo.nomedoprojeto.service.ProdutoService
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.*
+
+@RestController                  // Diz: "essa classe responde requisições HTTP em JSON"
+@RequestMapping("/produtos")     // Prefixo de todos os endpoints dessa classe
+class ProdutoController(
+    private val produtoService: ProdutoService
+) {
+
+    // POST /produtos — Criar novo produto
+    @PostMapping
+    fun criar(@RequestBody produto: Produto): ResponseEntity<Produto> {
+        val salvo = produtoService.salvar(produto)
+        return ResponseEntity.ok(salvo)
+    }
+
+    // GET /produtos — Listar todos
+    @GetMapping
+    fun listarTodos(): ResponseEntity<List<Produto>> {
+        return ResponseEntity.ok(produtoService.listarTodos())
+    }
+
+    // GET /produtos/{id} — Buscar por ID
+    @GetMapping("/{id}")
+    fun buscarPorId(@PathVariable id: Long): ResponseEntity<Produto> {
+        val produto = produtoService.buscarPorId(id)
+            ?: return ResponseEntity.notFound().build()
+        return ResponseEntity.ok(produto)
+    }
+
+    // PUT /produtos/{id} — Editar produto
+    @PutMapping("/{id}")
+    fun editar(@PathVariable id: Long, @RequestBody produto: Produto): ResponseEntity<Produto> {
+        val atualizado = produtoService.editar(id, produto)
+            ?: return ResponseEntity.notFound().build()
+        return ResponseEntity.ok(atualizado)
+    }
+
+    // DELETE /produtos/{id} — Deletar produto
+    @DeleteMapping("/{id}")
+    fun deletar(@PathVariable id: Long): ResponseEntity<Void> {
+        produtoService.deletar(id)
+        return ResponseEntity.noContent().build()   // Retorna 204 No Content
+    }
+}
+```
+
+---
+
+## 🧪 PASSO 7 — Testar no Postman
+
+### Configurar Base URL (faça isso primeiro!)
+
+> Isso evita ter que digitar `http://localhost:8080` em toda requisição.
+
+```
+1. Abrir Postman
+2. Clicar em "Environments" (ícone de olho, canto superior direito)
+3. Clicar em "Add" → dar nome: "Local"
+4. Adicionar variável:
+     Variable:         baseUrl
+     Initial value:    http://localhost:8080
+     Current value:    http://localhost:8080
+5. Clicar em "Save"
+6. No canto superior direito, selecionar o ambiente "Local"
+```
+
+Agora em vez de escrever `http://localhost:8080/produtos`, você escreve só:
+```
+{{baseUrl}}/produtos
+```
+
+### Criar Collection organizada
+
+```
+1. Clicar em "Collections" → botão "+"
+2. Dar nome: "API Prova"
+3. Dentro da collection, criar as requisições abaixo
+4. Salvar cada uma com Ctrl+S
+```
+
+---
+
+### Criar produto (POST)
+```
+Nome:    "Criar Produto"
+Método:  POST
+URL:     {{baseUrl}}/produtos
+Body:    raw → JSON (selecionar "JSON" no dropdown)
+
+{
+  "nome": "Notebook",
+  "preco": 2500.00,
+  "quantidade": 10
+}
+
+Retorno esperado: 200 OK com o objeto criado (incluindo o id gerado)
+```
+
+### Listar todos (GET)
+```
+Nome:    "Listar Todos"
+Método:  GET
+URL:     {{baseUrl}}/produtos
+
+Retorno esperado: 200 OK com array de objetos
+```
+
+### Buscar por ID (GET)
+```
+Nome:    "Buscar por ID"
+Método:  GET
+URL:     {{baseUrl}}/produtos/1
+
+Retorno esperado: 200 OK com o objeto
+                  404 Not Found se não existir
+```
+
+### Editar (PUT)
+```
+Nome:    "Editar Produto"
+Método:  PUT
+URL:     {{baseUrl}}/produtos/1
+Body:    raw → JSON
+
+{
+  "nome": "Notebook Gamer",
+  "preco": 3500.00,
+  "quantidade": 5
+}
+
+Retorno esperado: 200 OK com objeto atualizado
+```
+
+### Deletar (DELETE)
+```
+Nome:    "Deletar Produto"
+Método:  DELETE
+URL:     {{baseUrl}}/produtos/1
+
+Retorno esperado: 204 No Content (sem body — isso é correto!)
+```
+
+---
+
+## 📂 ESTRUTURA DE PASTAS — Como deve ficar
+
+```
+src/main/kotlin/com/exemplo/nomedoprojeto/
+  ├── entity/
+  │     └── Produto.kt
+  ├── repository/
+  │     └── ProdutoRepository.kt
+  ├── service/
+  │     └── ProdutoService.kt
+  ├── controller/
+  │     └── ProdutoController.kt
+  └── NomeDoProjetoApplication.kt   ← gerado automaticamente, não mexer
+
+src/main/resources/
+  └── application.properties
+```
+
+---
+
+## ⚡ ANOTAÇÕES — Cola rápida
+
+| Anotação | Onde usar | O que faz |
+|---|---|---|
+| `@Entity` | Entity | Marca como tabela do banco |
+| `@Table(name="...")` | Entity | Define nome da tabela |
+| `@Id` | Entity | Marca como chave primária |
+| `@GeneratedValue(...)` | Entity | Auto incremento do ID |
+| `open class` | Entity | Necessário para o Hibernate |
+| `@Repository` | Repository | Marca como repositório Spring |
+| `@Service` | Service | Marca como serviço Spring |
+| `@RestController` | Controller | Marca como controller REST |
+| `@RequestMapping("/rota")` | Controller | Define rota base |
+| `@PostMapping` | Controller | Rota POST |
+| `@GetMapping` | Controller | Rota GET |
+| `@GetMapping("/{id}")` | Controller | Rota GET com ID |
+| `@PutMapping("/{id}")` | Controller | Rota PUT (editar) |
+| `@DeleteMapping("/{id}")` | Controller | Rota DELETE |
+| `@RequestBody` | Parâmetro | Recebe JSON do body |
+| `@PathVariable` | Parâmetro | Pega o {id} da URL |
+
+---
+
+## 🚨 ERROS COMUNS E COMO RESOLVER
+
+| Erro | Causa | Solução |
+|---|---|---|
+| `Connection refused` | Banco não está rodando | Abrir PgAdmin e iniciar o servidor |
+| `database does not exist` | Banco não criado | Criar banco no PgAdmin antes de rodar |
+| `password authentication failed` | Senha errada | Checar senha no application.properties |
+| `could not proxy` | Faltou `open` na Entity | Adicionar `open` antes de `class` na Entity |
+| `No qualifying bean` | Esqueceu anotação | Checar @Service, @Repository, @RestController |
+| `404 Not Found` | Rota errada | Checar @RequestMapping e método HTTP |
+| `415 Unsupported Media Type` | Body sem Content-Type | No Postman: Body → raw → JSON |
+
+---
+
+## 💡 DICAS FINAIS PARA A PROVA
+
+1. **Crie o banco no PgAdmin ANTES de rodar o projeto** — o Hibernate cria as tabelas, não o banco.
+2. **Ordem sempre:** Entity → Repository → Service → Controller. Nunca pule.
+3. **Se der erro ao rodar:** leia a primeira linha de erro no console do IntelliJ — ela diz exatamente o que está errado.
+4. **Postman:** sempre coloque `Content-Type: application/json` ou selecione `raw → JSON` no Body.
+5. **Não precisa criar SQL manualmente** — o `spring.jpa.hibernate.ddl-auto=update` faz isso.
+6. **Copie do RPG Battle** — a estrutura é idêntica. Só muda o nome da entidade e os campos.
+
+---
+
+*Guia criado com base no projeto RPG Battle Simulator — pedrogehlen — 2026*
